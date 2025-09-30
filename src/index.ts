@@ -1,7 +1,7 @@
 import { calendarEvents } from "./calendarEvents";
 import { EmailMessage } from "./types/EmailMessage";
 import { getTimeIntervalsUserIsBusy } from "./triggers/onNewEmailMessage/getTimeIntervalsUserIsBusy";
-import { isEmailMessageContainingMeetingProposal, suggestMeetingSlotsForMeetingProposal } from "./triggers/onNewEmailMessage/suggestMeetingSlots";
+import { isEmailMessageContainingMeetingProposal, suggestMeetingSlotsForMeetingProposal, suggestMeetingSlotsForMeetingProposalDeterministic } from "./triggers/onNewEmailMessage/suggestMeetingSlots";
 
 // consts
 const USER_EMAIL = "matt.ffrench@fyxer.com";
@@ -15,8 +15,10 @@ export const mainPre = () => {
 // Q-MAIN-1
 export const main1 = async ({
   usersEmailMessage,
+  useDeterministic = false,
 }: {
   usersEmailMessage: EmailMessage;
+  useDeterministic?: boolean;
 }) => {
   // See functions in ./triggers/onNewEmailMessage/suggestMeetingSlots.ts
 
@@ -26,6 +28,12 @@ export const main1 = async ({
     return [];
   }
 
+  if (useDeterministic) {
+    return await suggestMeetingSlotsForMeetingProposalDeterministic({
+      emailMessage: usersEmailMessage,
+      userCalendarEvents: usersCalendarEvents,
+    });
+  }
   const suggestedMeetingSlots = await suggestMeetingSlotsForMeetingProposal({
     emailMessage: usersEmailMessage,
     userCalendarEvents: usersCalendarEvents,
@@ -38,6 +46,7 @@ export const main1 = async ({
 console.log("mainPre", mainPre());
 
 main1({
+  useDeterministic: true,
   usersEmailMessage: {
     threadId: "AAMkAGI2TAAA=",
     isFirstInThread: true,
@@ -47,7 +56,7 @@ main1({
     cc: [],
     bcc: [],
     content: "",
-    fullBody: "Shall we have an update meeting on the project at either 9am PST Wednesday or 10am PST Thursday?",
+    fullBody: "Can you do our board meeting next week one afternoon?",
     isDraft: false,
     isSpam: false,
     messageId: "<>",
