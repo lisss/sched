@@ -54,7 +54,7 @@ main1({
     forwardedContent: undefined,
     hasDoctypeHtml: false,
     subject: "Meeting Proposal",
-    sentAt: new Date("2024-10-01T10:00:00Z"),
+    sentAt: new Date(),
     attachmentData: [],
     hasUnsubscribeLink: false,
     headers: [],

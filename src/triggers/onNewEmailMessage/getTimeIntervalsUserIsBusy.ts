@@ -1,30 +1,30 @@
 import { CalendarEvent, TimeInterval } from "../../types/CalendarEvent";
 import {
-  parseISO,
-  addDays,
-  startOfDay,
-  max,
-  min,
-  addHours,
-  startOfWeek,
-  isWeekend,
-  getHours,
-  getMinutes,
-  differenceInMinutes,
-  addBusinessDays,
-  startOfMinute,
+  // parseISO,
+  // addDays,
+  // startOfDay,
+  // max,
+  // min,
+  // addHours,
+  // startOfWeek,
+  // isWeekend,
+  // getHours,
+  // getMinutes,
+  // differenceInMinutes,
+  // addBusinessDays,
+  // startOfMinute,
   addWeeks,
-  addMinutes,
+  // addMinutes,
   areIntervalsOverlapping,
-  endOfDay,
+  // endOfDay,
 } from "date-fns";
 
-import {
-  // UTC => local
-  toZonedTime,
-  // local => UTC
-  fromZonedTime,
-} from "date-fns-tz";
+// import {
+//   // UTC => local
+//   toZonedTime,
+//   // local => UTC
+//   fromZonedTime,
+// } from "date-fns-tz";
 
 export const getTimeIntervalsUserIsBusy = (
   eventsFromUsersCalendar: CalendarEvent[],
@@ -40,6 +40,7 @@ export const getTimeIntervalsUserIsBusy = (
   // which decides whether we use an LLM or just some heuristics. For now, let's stick to heuristics. Specially given signature is non-async, suggesting local compute no IO type fn.
   // 4. Handle times as well, let's just assume no timezone schenanigans, since we have no info of user timezones, everything is in ~~local time~~ types mention UTC, assume everything is UTC.
   // 5. Only two invitees, and other invitee has declined, then shouldn't be busy..
+       // doesn't need to be only two, can be hundreds, as long as everyone else has declined, user is not busy?
 
   // We don't know the time reference, since it appears like sample events are from 2024, so next two weeks from 'now' doesn't really work.
   // looks like this is updated programmatically when run 👀
@@ -55,8 +56,6 @@ export const getTimeIntervalsUserIsBusy = (
   .filter(event => {
     return event.endsAt >= now && event.startsAt <= addWeeks(now, 2)
   })
-
-  console.log("eventsReferencingUser", eventsReferencingUser);
 
   const busyEvents = eventsReferencingUser.filter((event) => {
     // TODO: Create compare fn for emails to refactor everywhere here
@@ -96,7 +95,18 @@ export const getTimeIntervalsUserIsBusy = (
     if (isUserOrganiser && !everyoneDeclined) {
       return true;
     }
+
+    if (isUserOrganiser && filteredInvitees.length === 0) {
+      return true;
+    }
+
+    // default to not busy
     return false;
+
+    // TODO: Product wise, is this enough? Do we want to take into consideration any other user preferences while determining busy status?
+    // e.g. also fallback to LLM for an event and pass in any user preferences they've told us in plain text about what to treat as busy
+    // e.g. "I want to treat all day events as busy unless the title has 'work in shoreditch' or 'lunch with' in it"
+    // or "I want to treat all events outside working hours as not busy, unless the title has 'important' in it"
 
     // Case 1: User is invitee and has declined => not busy --> not necessary to make explicit, since default is false
     // const userIsInviteeAndDeclined = event.invitees.some(
@@ -109,8 +119,6 @@ export const getTimeIntervalsUserIsBusy = (
     // }
   });
 
-  console.log("busyEvents", busyEvents);
-
   // map to time intervals
   const busyTimeIntervals: TimeInterval[] = busyEvents.map((event) => ({
     startsAt: event.startsAt,
@@ -119,8 +127,6 @@ export const getTimeIntervalsUserIsBusy = (
 
   // sort by start time
   busyTimeIntervals.sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
-
-  console.log("busyTimeIntervals", busyTimeIntervals);
 
   // merge overlapping intervals
   // TODO: Extract and test this fn
