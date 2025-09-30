@@ -3,12 +3,6 @@ import { EmailMessage } from "../../types/EmailMessage";
 import { getTimeIntervalsUserIsBusy } from "./getTimeIntervalsUserIsBusy";
 import { openAIClient } from "../../clients/openai";
 
-import {
-  // UTC => local
-  toZonedTime,
-  // local => UTC
-  fromZonedTime,
-} from "date-fns-tz";
 
 const isEmailMessageContainingMeetingProposal = async (
   emailMessage: EmailMessage
