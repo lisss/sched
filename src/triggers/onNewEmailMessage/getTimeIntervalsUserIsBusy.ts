@@ -29,4 +29,123 @@ import {
 export const getTimeIntervalsUserIsBusy = (
   eventsFromUsersCalendar: CalendarEvent[],
   userEmail: string
-): TimeInterval[] => eventsFromUsersCalendar;
+): TimeInterval[] => {
+  // Filter for events in the next two weeks that the user is busy for
+
+  // What makes a user busy:
+  // 1. If they organised the event* (but see 5)
+  // 2. If calendar invitee decision is accepted or tentative. This will change based on how we use this function, but given limited
+  // information, go with just this
+  // 3. If all day event, parse title, OOO is busy, but work in shoreditch is probably not busy. Unclear how this function is called and what perf requirements exist here,
+  // which decides whether we use an LLM or just some heuristics. For now, let's stick to heuristics. Specially given signature is non-async, suggesting local compute no IO type fn.
+  // 4. Handle times as well, let's just assume no timezone schenanigans, since we have no info of user timezones, everything is in ~~local time~~ types mention UTC, assume everything is UTC.
+  // 5. Only two invitees, and other invitee has declined, then shouldn't be busy..
+
+  // We don't know the time reference, since it appears like sample events are from 2024, so next two weeks from 'now' doesn't really work.
+  // looks like this is updated programmatically when run 👀
+
+  const now = new Date();
+  
+  // emails are case insensitive
+  const eventsReferencingUser =  eventsFromUsersCalendar.filter(event => {
+    return event.organiser.emailAddress.toLowerCase() === userEmail.toLowerCase() || event.invitees.map(invitee => invitee.emailAddress.toLowerCase()).includes(userEmail.toLowerCase()) 
+  })
+
+  // filter to events in the next two weeks
+  .filter(event => {
+    return event.endsAt >= now && event.startsAt <= addWeeks(now, 2)
+  })
+
+  console.log("eventsReferencingUser", eventsReferencingUser);
+
+  const busyEvents = eventsReferencingUser.filter((event) => {
+    // TODO: Create compare fn for emails to refactor everywhere here
+
+    // Case 2: All day event, and title has OOO or out of office => busy
+    if (event.isAllDay) {
+      const titleLower = event.title.toLowerCase();
+      if (titleLower.includes("ooo") || titleLower.includes("out of office")) {
+        return true;
+      } else {
+        return false;
+      }
+    }
+
+    // Case 3: User is invitee and has not declined => busy
+    const userIsInviteeAndNotDeclined = event.invitees.some(
+      (invitee) =>
+        invitee.emailAddress.toLowerCase() === userEmail.toLowerCase() &&
+        (invitee.attendanceDecision === "ACCEPTED" ||
+          invitee.attendanceDecision === "TENTATIVE" ||
+          invitee.attendanceDecision === "PENDING")
+    );
+    if (userIsInviteeAndNotDeclined) {
+      return true;
+    }
+
+    // Case 4: User is organiser and not everyone has declined, or no invitees at all (self-block)
+    const filteredInvitees = event.invitees.filter(invitee => invitee.emailAddress.toLowerCase() != event.organiser.emailAddress.toLowerCase())
+    const isUserOrganiser =
+      event.organiser.emailAddress.toLowerCase() === userEmail.toLowerCase();
+    const responses = filteredInvitees.map(
+      (invitee) => invitee.attendanceDecision
+    );
+    const everyoneDeclined =
+      responses.length > 0 &&
+      responses.every((decision) => decision === "DECLINED");
+    if (isUserOrganiser && !everyoneDeclined) {
+      return true;
+    }
+    return false;
+
+    // Case 1: User is invitee and has declined => not busy --> not necessary to make explicit, since default is false
+    // const userIsInviteeAndDeclined = event.invitees.some(
+    //   (invitee) =>
+    //     invitee.emailAddress.toLowerCase() === userEmail.toLowerCase() &&
+    //     invitee.attendanceDecision === "DECLINED"
+    // );
+    // if (userIsInviteeAndDeclined) {
+    //   return false;
+    // }
+  });
+
+  console.log("busyEvents", busyEvents);
+
+  // map to time intervals
+  const busyTimeIntervals: TimeInterval[] = busyEvents.map((event) => ({
+    startsAt: event.startsAt,
+    endsAt: event.endsAt,
+  }));
+
+  // sort by start time
+  busyTimeIntervals.sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
+
+  console.log("busyTimeIntervals", busyTimeIntervals);
+
+  // merge overlapping intervals
+  // TODO: Extract and test this fn
+  const mergedBusyTimeIntervals: TimeInterval[] = [];
+  for (const interval of busyTimeIntervals) {
+    if (mergedBusyTimeIntervals.length === 0) {
+      mergedBusyTimeIntervals.push(interval);
+    } else {
+      const lastInterval =
+        mergedBusyTimeIntervals[mergedBusyTimeIntervals.length - 1];
+      if (
+        areIntervalsOverlapping(
+          { start: lastInterval.startsAt, end: lastInterval.endsAt },
+          { start: interval.startsAt, end: interval.endsAt }
+        )
+      ) {
+        // merge
+        lastInterval.endsAt = new Date(Math.max(lastInterval.endsAt.getTime(), interval.endsAt.getTime()));
+      } else {
+        mergedBusyTimeIntervals.push(interval);
+      }
+    }
+  }
+
+  return mergedBusyTimeIntervals;
+
+  // TODO: This fn requires heavy heavy testing. Do if time remains..
+}

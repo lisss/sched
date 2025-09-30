@@ -20,4 +20,6 @@ export const main1 = async ({
   // See functions in ./triggers/onNewEmailMessage/suggestMeetingSlots.ts
 };
 
+console.log("mainPre", mainPre());
+
 
