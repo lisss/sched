@@ -1,5 +1,5 @@
 import express from "express";
-import { mainPre, main1 } from "./index.js";
+import { getIntervalsIsBusy, getSlots } from "./index.js";
 import { EmailMessage } from "./types/EmailMessage.js";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -16,7 +16,7 @@ app.use(express.static(path.join(__dirname, "../public")));
 // API endpoint for Q-PRE - Get busy time intervals
 app.get("/api/busy-intervals", (_req, res) => {
   try {
-    const intervals = mainPre();
+    const intervals = getIntervalsIsBusy();
     res.json({ intervals });
   } catch (error) {
     console.error("Error getting busy intervals:", error);
@@ -40,7 +40,7 @@ app.post("/api/suggest-slots", async (req, res): Promise<void> => {
       sentAt: new Date(emailMessage.sentAt),
     };
 
-    const slots = await main1({
+    const slots = await getSlots({
       usersEmailMessage: processedEmail,
       useDeterministic,
     });

@@ -19,6 +19,8 @@ const MEETING_KEYWORDS = [
   "board",
   "schedule",
   "availability",
+  "session",
+  "planning",
 ];
 
 const MINUTES_IN_HOUR = 60;
@@ -295,7 +297,8 @@ const getDayMentions = (content: string, now: Date): DayMention[] => {
       const index = match.index ?? 0;
       const [, nextQualifier, dayToken] = match;
       if (dayToken === "today") {
-        return { day: normalizeToDay(now), index };
+        const today = normalizeToDay(now);
+        return { day: today, index };
       }
       if (dayToken === "tomorrow") {
         const tomorrow = new Date(now);
@@ -310,8 +313,17 @@ const getDayMentions = (content: string, now: Date): DayMention[] => {
 
       const currentDayIndex = now.getDay();
       let delta = (targetIndex - currentDayIndex + 7) % 7;
-      if (delta === 0 && nextQualifier) {
-        delta = 7;
+      if (delta === 0) {
+        if (nextQualifier) {
+          delta = 7;
+        } else {
+          const todayNormalized = normalizeToDay(now);
+          const candidate = new Date(todayNormalized);
+          candidate.setHours(17, 0, 0, 0);
+          if (now >= candidate) {
+            delta = 7;
+          }
+        }
       } else if (nextQualifier) {
         delta += 7;
       }
@@ -422,6 +434,36 @@ const buildDayWindowPairs = (
     );
     
     if (windowsInSpan.length === 0) {
+      const fallbackWindows = windowTokens.filter(
+        (token) => token.index >= mention.index && token.index < nextDayIndex
+      );
+      if (fallbackWindows.length > 0) {
+        const sorted = fallbackWindows.sort((a, b) => {
+          const aSize = a.window.endMinutes - a.window.startMinutes;
+          const bSize = b.window.endMinutes - b.window.startMinutes;
+          return aSize - bSize;
+        });
+        return [{ day: mention.day, window: sorted[0].window }];
+      }
+      const allWindows = windowTokens.filter(
+        (token) => token.index > mention.index
+      );
+      if (allWindows.length > 0) {
+        const sorted = allWindows.sort((a, b) => {
+          const aDist = Math.abs(a.index - mention.index);
+          const bDist = Math.abs(b.index - mention.index);
+          return aDist - bDist;
+        });
+        return [{ day: mention.day, window: sorted[0].window }];
+      }
+      if (windowTokens.length > 0) {
+        const sorted = windowTokens.sort((a, b) => {
+          const aDist = Math.abs((a.index || 0) - mention.index);
+          const bDist = Math.abs((b.index || 0) - mention.index);
+          return aDist - bDist;
+        });
+        return [{ day: mention.day, window: sorted[0].window }];
+      }
       return [];
     }
     
@@ -432,10 +474,24 @@ const buildDayWindowPairs = (
       if (Math.abs(sizeDiff) > 60) {
         return sizeDiff;
       }
-      return Math.abs(a.index - mention.index) - Math.abs(b.index - mention.index);
+      const aDist = Math.abs(a.index - mention.index);
+      const bDist = Math.abs(b.index - mention.index);
+      return aDist - bDist;
     });
     
     const bestWindow = sortedWindows[0];
+    const specificWindows = sortedWindows.filter(w => {
+      const size = w.window.endMinutes - w.window.startMinutes;
+      return size <= 4 * MINUTES_IN_HOUR;
+    });
+    
+    if (specificWindows.length > 0) {
+      return specificWindows.map(w => ({
+        day: mention.day,
+        window: w.window
+      }));
+    }
+    
     return [{ 
       day: mention.day, 
       window: bestWindow.window 
@@ -635,6 +691,8 @@ const suggestMeetingSlotsForMeetingProposalDeterministic = async ({
   const dayMentions = getDayMentions(content, now);
   const windowTokens = getWindowTokens(content);
   const requestedDurationMinutes = getRequestedDurationMinutes(content);
+  const isTodayMentioned = content.includes("today");
+  const todayDate = normalizeToDay(now);
 
   let dayWindowPairs: { day: Date; window: MinuteWindow }[] = [];
   
@@ -647,10 +705,19 @@ const suggestMeetingSlotsForMeetingProposalDeterministic = async ({
       );
     }
   } else if (dayMentions.length > 0 && windowTokens.length === 0) {
-    dayWindowPairs = dayMentions.map((mention) => ({ 
-      day: mention.day, 
-      window: defaultWindow 
-    }));
+    dayWindowPairs = dayMentions.map((mention) => {
+      const isToday = mention.day.toDateString() === todayDate.toDateString();
+      if (isToday && isTodayMentioned) {
+        const currentMinutes = minutesOfDay(now);
+        const nextHourStart = Math.ceil(currentMinutes / MINUTES_IN_HOUR) * MINUTES_IN_HOUR;
+        const window: MinuteWindow = {
+          startMinutes: Math.max(nextHourStart, WORKING_HOURS_START * MINUTES_IN_HOUR),
+          endMinutes: WORKING_HOURS_END * MINUTES_IN_HOUR,
+        };
+        return { day: mention.day, window };
+      }
+      return { day: mention.day, window: defaultWindow };
+    });
   } else if (dayMentions.length === 0 && windowTokens.length > 0) {
     dayWindowPairs = upcomingWorkingDays(now, DEFAULT_WORKING_DAY_LOOKAHEAD).flatMap((day) =>
       windowTokens.map((token) => ({ day, window: token.window }))
@@ -658,26 +725,251 @@ const suggestMeetingSlotsForMeetingProposalDeterministic = async ({
   }
   
   if (dayWindowPairs.length === 0 && dayMentions.length > 0) {
-    dayWindowPairs = dayMentions.map((mention) => ({ 
-      day: mention.day, 
-      window: defaultWindow 
-    }));
+    if (windowTokens.length > 0) {
+      dayWindowPairs = dayMentions.flatMap((mention) =>
+        windowTokens.map((token) => ({ day: mention.day, window: token.window }))
+      );
+    } else {
+      dayWindowPairs = dayMentions.map((mention) => {
+        const isToday = mention.day.toDateString() === todayDate.toDateString();
+        if (isToday && isTodayMentioned) {
+          const currentMinutes = minutesOfDay(now);
+          const nextHourStart = Math.ceil(currentMinutes / MINUTES_IN_HOUR) * MINUTES_IN_HOUR;
+          const window: MinuteWindow = {
+            startMinutes: Math.max(nextHourStart, WORKING_HOURS_START * MINUTES_IN_HOUR),
+            endMinutes: WORKING_HOURS_END * MINUTES_IN_HOUR,
+          };
+          return { day: mention.day, window };
+        }
+        return { day: mention.day, window: defaultWindow };
+      });
+    }
+  }
+  
+  if (isTodayMentioned && dayWindowPairs.length === 0 && dayMentions.length > 0 && windowTokens.length > 0) {
+    const todayMention = dayMentions.find(m => m.day.toDateString() === todayDate.toDateString());
+    if (todayMention) {
+      dayWindowPairs = windowTokens.map((token) => ({ day: todayMention.day, window: token.window }));
+    }
   }
 
-  const candidateSlots = dayWindowPairs.flatMap(({ day, window }) =>
-    createSlotsFromWindow(day, window, requestedDurationMinutes)
-  );
+  if (isTodayMentioned && dayWindowPairs.length === 0) {
+    if (dayMentions.length > 0 && windowTokens.length > 0) {
+      const todayMention = dayMentions.find(m => m.day.toDateString() === todayDate.toDateString());
+      if (todayMention) {
+        dayWindowPairs = windowTokens.map((token) => ({ day: todayMention.day, window: token.window }));
+      } else if (dayMentions.length > 0) {
+        dayWindowPairs = dayMentions.flatMap((mention) =>
+          windowTokens.map((token) => ({ day: mention.day, window: token.window }))
+        );
+      }
+    } else if (dayMentions.length > 0) {
+      const todayMention = dayMentions.find(m => m.day.toDateString() === todayDate.toDateString());
+      if (todayMention) {
+        const currentMinutes = minutesOfDay(now);
+        const nextHourStart = Math.ceil(currentMinutes / MINUTES_IN_HOUR) * MINUTES_IN_HOUR;
+        const window: MinuteWindow = {
+          startMinutes: Math.max(nextHourStart, WORKING_HOURS_START * MINUTES_IN_HOUR),
+          endMinutes: WORKING_HOURS_END * MINUTES_IN_HOUR,
+        };
+        dayWindowPairs = [{ day: todayMention.day, window }];
+      }
+    }
+  }
 
-  const validSlots = filterValidSlots(candidateSlots, userBusySlots, now).slice(
-    0,
-    MAX_SUGGESTIONS
-  );
+  const candidateSlots = dayWindowPairs.flatMap(({ day, window }) => {
+    const isToday = day.toDateString() === todayDate.toDateString();
+    
+    if (isToday && isTodayMentioned) {
+      const todaySlots = createSlotsFromWindow(day, window, requestedDurationMinutes);
+      const validTodaySlots = todaySlots.filter(slot => slot.startsAt >= now);
+      
+      if (validTodaySlots.length > 0) {
+        return validTodaySlots;
+      }
+      
+      const currentMinutes = minutesOfDay(now);
+      const nextHourStart = Math.ceil(currentMinutes / MINUTES_IN_HOUR) * MINUTES_IN_HOUR;
+      if (nextHourStart < WORKING_HOURS_END * MINUTES_IN_HOUR) {
+        const restOfTodayWindow: MinuteWindow = {
+          startMinutes: Math.max(nextHourStart, WORKING_HOURS_START * MINUTES_IN_HOUR),
+          endMinutes: WORKING_HOURS_END * MINUTES_IN_HOUR,
+        };
+        const restOfTodaySlots = createSlotsFromWindow(day, restOfTodayWindow, requestedDurationMinutes);
+        const validRestOfToday = restOfTodaySlots.filter(slot => slot.startsAt >= now);
+        if (validRestOfToday.length > 0) {
+          return validRestOfToday;
+        }
+      }
+      
+      for (let i = 1; i <= 14; i++) {
+        const nextDay = new Date(day);
+        nextDay.setDate(day.getDate() + i);
+        if (isWeekday(nextDay)) {
+          const nextDaySlots = createSlotsFromWindow(normalizeToDay(nextDay), window, requestedDurationMinutes);
+          const validNextSlots = nextDaySlots.filter(slot => slot.startsAt >= now);
+          if (validNextSlots.length > 0) {
+            return validNextSlots;
+          }
+        }
+      }
+      
+      return todaySlots;
+    }
+    
+    return createSlotsFromWindow(day, window, requestedDurationMinutes);
+  });
+
+  const validSlots = filterValidSlots(candidateSlots, userBusySlots, now);
 
   if (validSlots.length > 0) {
-    return validSlots;
+    return validSlots.slice(0, MAX_SUGGESTIONS);
   }
 
-  return generateFallbackSlots(userBusySlots);
+  if (isTodayMentioned) {
+    const todaySlotsOnly = candidateSlots.filter(slot => {
+      const slotDay = normalizeToDay(slot.startsAt);
+      return slotDay.toDateString() === todayDate.toDateString() && slot.startsAt >= now;
+    });
+    
+    if (todaySlotsOnly.length > 0) {
+      const todayValid = filterValidSlots(todaySlotsOnly, userBusySlots, now);
+      if (todayValid.length > 0) {
+        return todayValid.slice(0, MAX_SUGGESTIONS);
+      }
+      
+      const todayRelaxed = todaySlotsOnly
+        .filter((slot) => slot.endsAt > slot.startsAt)
+        .filter((slot) => isWeekday(slot.startsAt))
+        .filter((slot) => slot.endsAt <= addWeeks(now, 2))
+        .slice(0, MAX_SUGGESTIONS);
+      
+      if (todayRelaxed.length > 0) {
+        return todayRelaxed;
+      }
+    }
+    
+    if (candidateSlots.length === 0 && dayWindowPairs.length === 0) {
+      const todayMention = dayMentions.find(m => m.day.toDateString() === todayDate.toDateString());
+      if (todayMention) {
+        const currentMinutes = minutesOfDay(now);
+        const nextHourStart = Math.ceil(currentMinutes / MINUTES_IN_HOUR) * MINUTES_IN_HOUR;
+        const window: MinuteWindow = {
+          startMinutes: Math.max(nextHourStart, WORKING_HOURS_START * MINUTES_IN_HOUR),
+          endMinutes: WORKING_HOURS_END * MINUTES_IN_HOUR,
+        };
+        const forceTodaySlots = createSlotsFromWindow(todayMention.day, window, requestedDurationMinutes);
+        const forceTodayValid = filterValidSlots(forceTodaySlots, userBusySlots, now);
+        if (forceTodayValid.length > 0) {
+          return forceTodayValid.slice(0, MAX_SUGGESTIONS);
+        }
+      }
+    }
+  }
+
+  if (isTodayMentioned && validSlots.length === 0) {
+    const todayMention = dayMentions.find(m => m.day.toDateString() === todayDate.toDateString());
+    if (todayMention) {
+      let emergencyPairs: { day: Date; window: MinuteWindow }[] = [];
+      
+      if (windowTokens.length > 0) {
+        emergencyPairs = windowTokens.map((token) => ({ day: todayMention.day, window: token.window }));
+      } else {
+        const currentMinutes = minutesOfDay(now);
+        const nextHourStart = Math.ceil(currentMinutes / MINUTES_IN_HOUR) * MINUTES_IN_HOUR;
+        const window: MinuteWindow = {
+          startMinutes: Math.max(nextHourStart, WORKING_HOURS_START * MINUTES_IN_HOUR),
+          endMinutes: WORKING_HOURS_END * MINUTES_IN_HOUR,
+        };
+        emergencyPairs = [{ day: todayMention.day, window }];
+      }
+      
+      const emergencySlots = emergencyPairs.flatMap(({ day, window }) => {
+        const slots = createSlotsFromWindow(day, window, requestedDurationMinutes);
+        const valid = slots.filter(slot => slot.startsAt >= now);
+        if (valid.length > 0) {
+          return valid;
+        }
+        for (let i = 1; i <= 14; i++) {
+          const nextDay = new Date(day);
+          nextDay.setDate(day.getDate() + i);
+          if (isWeekday(nextDay)) {
+            const nextSlots = createSlotsFromWindow(normalizeToDay(nextDay), window, requestedDurationMinutes);
+            const validNext = nextSlots.filter(slot => slot.startsAt >= now);
+            if (validNext.length > 0) {
+              return validNext;
+            }
+          }
+        }
+        return slots;
+      });
+      
+      const emergencyValid = filterValidSlots(emergencySlots, userBusySlots, now);
+      if (emergencyValid.length > 0) {
+        return emergencyValid.slice(0, MAX_SUGGESTIONS);
+      }
+      
+      const emergencyRelaxed = emergencySlots
+        .filter((slot) => slot.startsAt >= now)
+        .filter((slot) => slot.endsAt > slot.startsAt)
+        .filter((slot) => isWeekday(slot.startsAt))
+        .filter((slot) => slot.endsAt <= addWeeks(now, 2))
+        .slice(0, MAX_SUGGESTIONS);
+      
+      if (emergencyRelaxed.length > 0) {
+        return emergencyRelaxed;
+      }
+    }
+  }
+
+  if (dayWindowPairs.length > 0) {
+    const relaxedSlots = candidateSlots
+      .filter((slot) => slot.startsAt >= now)
+      .filter((slot) => slot.endsAt > slot.startsAt)
+      .filter((slot) => isWeekday(slot.startsAt))
+      .filter((slot) => slot.endsAt <= addWeeks(now, 2))
+      .slice(0, MAX_SUGGESTIONS);
+    
+    if (relaxedSlots.length > 0) {
+      return relaxedSlots;
+    }
+  }
+
+  if (isTodayMentioned) {
+    const fallbackSlots = generateFallbackSlots(userBusySlots);
+    if (fallbackSlots.length > 0) {
+      return fallbackSlots;
+    }
+    
+    const todayMention = dayMentions.find(m => m.day.toDateString() === todayDate.toDateString());
+    if (todayMention) {
+      const currentMinutes = minutesOfDay(now);
+      const nextHourStart = Math.ceil(currentMinutes / MINUTES_IN_HOUR) * MINUTES_IN_HOUR;
+      const window: MinuteWindow = {
+        startMinutes: Math.max(nextHourStart, WORKING_HOURS_START * MINUTES_IN_HOUR),
+        endMinutes: WORKING_HOURS_END * MINUTES_IN_HOUR,
+      };
+      
+      for (let i = 0; i <= 14; i++) {
+        const targetDay = new Date(todayMention.day);
+        targetDay.setDate(todayMention.day.getDate() + i);
+        if (isWeekday(targetDay)) {
+          const slots = createSlotsFromWindow(normalizeToDay(targetDay), window, requestedDurationMinutes);
+          const valid = slots.filter(slot => slot.startsAt >= now);
+          if (valid.length > 0) {
+            return valid.slice(0, MAX_SUGGESTIONS);
+          }
+        }
+      }
+    }
+  }
+
+  const fallbackSlots = generateFallbackSlots(userBusySlots);
+  if (fallbackSlots.length > 0) {
+    return fallbackSlots;
+  }
+
+  return [];
 };
 
 export {

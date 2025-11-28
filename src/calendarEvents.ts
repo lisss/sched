@@ -5386,6 +5386,39 @@ export const calendarEvents = [
       },
     ],
   },
+   {
+    title: "Accuracy review",
+    startsAt: "2024-03-26T15:30:00Z",
+    endsAt: "2024-03-26T15:45:00Z",
+    isAllDay: false,
+    isRecurring: false,
+    organiser: {
+      emailAddress: "richard@fyxer.com",
+      name: "Richard",
+    },
+    invitees: [
+      {
+        emailAddress: "matt.ffrench@fyxer.com",
+        name: "Matt Ffrench",
+        attendanceDecision: "DECLINED",
+      },
+      {
+        emailAddress: "adrian.chen@fyxer.com",
+        name: "Adrian Chen",
+        attendanceDecision: "DECLINED",
+      },
+      {
+        emailAddress: "susan.khan@fyxer.com",
+        name: "Susan Khan",
+        attendanceDecision: "ACCEPTED",
+      },
+      {
+        emailAddress: "ellie.rice@fyxer.com",
+        name: "Ellie Rice",
+        attendanceDecision: "TENTATIVE",
+      },
+    ],
+  },
   {
     title: "Work in Shoreditch",
     startsAt: "2024-03-26T00:00:00Z",

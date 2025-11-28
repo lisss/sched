@@ -3,25 +3,20 @@ import { EmailMessage } from "./types/EmailMessage";
 import { getTimeIntervalsUserIsBusy } from "./triggers/onNewEmailMessage/getTimeIntervalsUserIsBusy";
 import { isEmailMessageContainingMeetingProposal, suggestMeetingSlotsForMeetingProposal, suggestMeetingSlotsForMeetingProposalDeterministic } from "./triggers/onNewEmailMessage/suggestMeetingSlots";
 
-// consts
 const USER_EMAIL = "matt.ffrench@fyxer.com";
 const usersCalendarEvents = calendarEvents.map((event) => ({...event, userEmail: USER_EMAIL}));
 
-// Q-PRE
-export const mainPre = () => {
+export const getIntervalsIsBusy = () => {
   return getTimeIntervalsUserIsBusy(usersCalendarEvents, USER_EMAIL);
 }
 
-// Q-MAIN-1
-export const main1 = async ({
+export const getSlots = async ({
   usersEmailMessage,
   useDeterministic = false,
 }: {
   usersEmailMessage: EmailMessage;
   useDeterministic?: boolean;
 }) => {
-  // See functions in ./triggers/onNewEmailMessage/suggestMeetingSlots.ts
-
   const isMeetingProposal = await isEmailMessageContainingMeetingProposal(usersEmailMessage);
 
   if (!isMeetingProposal) {
@@ -42,10 +37,9 @@ export const main1 = async ({
   return suggestedMeetingSlots;
 };
 
-// testing, assuming this is how they'll be called
-console.log("mainPre", mainPre());
+console.log("getSlots", getIntervalsIsBusy());
 
-main1({
+getSlots({
   useDeterministic: true,
   usersEmailMessage: {
     threadId: "AAMkAGI2TAAA=",
