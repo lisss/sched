@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fyxer Meeting Scheduler</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        .card h2 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 1.5em;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-weight: 500;
+        }
+
+        textarea, input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            font-family: inherit;
+            transition: border-color 0.3s;
+        }
+
+        textarea:focus, input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        textarea {
+            min-height: 120px;
+            resize: vertical;
+        }
+
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .checkbox-group input[type="checkbox"] {
+            width: auto;
+            cursor: pointer;
+        }
+
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .results {
+            margin-top: 20px;
+        }
+
+        .result-item {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            border-left: 4px solid #667eea;
+        }
+
+        .result-item strong {
+            color: #333;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #667eea;
+        }
+
+        .error {
+            background: #fee;
+            color: #c33;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 10px;
+            border-left: 4px solid #c33;
+        }
+
+        .example-emails {
+            margin-top: 20px;
+        }
+
+        .example-email {
+            background: #f0f0f0;
+            padding: 10px;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .example-email:hover {
+            background: #e0e0e0;
+        }
+
+        .example-email-title {
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📅 Fyxer Meeting Scheduler</h1>
+
+        <div class="card">
+            <h2>Q-PRE: Busy Time Intervals</h2>
+            <p style="color: #666; margin-bottom: 20px;">Get all time intervals in the next 2 weeks when the user is busy.</p>
+            <button onclick="getBusyIntervals()">Get Busy Intervals</button>
+            <div id="busy-results" class="results"></div>
+        </div>
+
+        <div class="card">
+            <h2>Q-MAIN-1: Suggest Meeting Slots</h2>
+            <p style="color: #666; margin-bottom: 20px;">Enter an email message to get suggested meeting slots.</p>
+            
+            <div class="form-group">
+                <label for="email-subject">Subject:</label>
+                <input type="text" id="email-subject" placeholder="Meeting Proposal" value="Meeting Proposal">
+            </div>
+
+            <div class="form-group">
+                <label for="email-from">From (email):</label>
+                <input type="email" id="email-from" placeholder="john@doe.com" value="john@doe.com">
+            </div>
+
+            <div class="form-group">
+                <label for="email-from-name">From (name):</label>
+                <input type="text" id="email-from-name" placeholder="John Doe" value="John Doe">
+            </div>
+
+            <div class="form-group">
+                <label for="email-body">Email Body:</label>
+                <textarea id="email-body" placeholder="Can you do our board meeting next week one afternoon?">Can you do our board meeting next week one afternoon?</textarea>
+            </div>
+
+            <div class="form-group checkbox-group">
+                <input type="checkbox" id="use-deterministic">
+                <label for="use-deterministic" style="margin: 0;">Use Deterministic Mode</label>
+            </div>
+
+            <button onclick="suggestSlots()">Suggest Meeting Slots</button>
+            <div id="slots-results" class="results"></div>
+        </div>
+
+        <div class="card">
+            <h2>Example Emails</h2>
+            <p style="color: #666; margin-bottom: 20px;">Click an example to populate the form:</p>
+            <div class="example-emails">
+                <div class="example-email" onclick="loadExample(1)">
+                    <div class="example-email-title">Example 1: General availability request</div>
+                    <div style="color: #666; font-size: 0.9em;">"When are you free for a catchup?"</div>
+                </div>
+                <div class="example-email" onclick="loadExample(2)">
+                    <div class="example-email-title">Example 2: Specific time request</div>
+                    <div style="color: #666; font-size: 0.9em;">"Can you do our board meeting next week one afternoon?"</div>
+                </div>
+                <div class="example-email" onclick="loadExample(3)">
+                    <div class="example-email-title">Example 3: Specific time and duration</div>
+                    <div style="color: #666; font-size: 0.9em;">"Are you free today at 4 pm for a 1:1 for 45 mins?"</div>
+                </div>
+                <div class="example-email" onclick="loadExample(4)">
+                    <div class="example-email-title">Example 4: Multiple time options</div>
+                    <div style="color: #666; font-size: 0.9em;">"Shall we have an update meeting at either 9am PST Wednesday or 10am PST Thursday?"</div>
+                </div>
+                <div class="example-email" onclick="loadExample(5)">
+                    <div class="example-email-title">Example 5: Time range options</div>
+                    <div style="color: #666; font-size: 0.9em;">"Are you free for 30 minutes on Wednesday afternoon 1-3pm or Fri 9am-1pm?"</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const examples = {
+            1: {
+                subject: "Catchup",
+                from: "joey@fyxer.com",
+                fromName: "Joey",
+                body: "Hey Matt,\n\nWhen are you free for a catchup?\n\nBest,\nJoey"
+            },
+            2: {
+                subject: "Meeting Proposal",
+                from: "john@doe.com",
+                fromName: "John Doe",
+                body: "Can you do our board meeting next week one afternoon?"
+            },
+            3: {
+                subject: "1:1 Meeting",
+                from: "joey@fyxer.com",
+                fromName: "Joey",
+                body: "Hi Matt,\n\nAre you free today at 4 pm for a 1:1 for 45 mins?\n\nBest,\nJoey"
+            },
+            4: {
+                subject: "Update Meeting",
+                from: "joey@fyxer.com",
+                fromName: "Joey",
+                body: "Hi Josh\n\nShall we have an update meeting on the project at either 9am PST Wednesday or 10am PST Thursday?\n\nBest,\nJoey"
+            },
+            5: {
+                subject: "Planning Session",
+                from: "serafin@fyxer.com",
+                fromName: "Serafin",
+                body: "Hi Matt,\n\nAre you free for 30 minutes on Wednesday afternoon 1-3pm or Fri 9am-1pm for a planning session?\n\nBest,\nSerafin"
+            }
+        };
+
+        function loadExample(num) {
+            const example = examples[num];
+            document.getElementById('email-subject').value = example.subject;
+            document.getElementById('email-from').value = example.from;
+            document.getElementById('email-from-name').value = example.fromName;
+            document.getElementById('email-body').value = example.body;
+        }
+
+        async function getBusyIntervals() {
+            const resultsDiv = document.getElementById('busy-results');
+            resultsDiv.innerHTML = '<div class="loading">Loading...</div>';
+
+            try {
+                const response = await fetch('/api/busy-intervals');
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to get busy intervals');
+                }
+
+                if (data.intervals.length === 0) {
+                    resultsDiv.innerHTML = '<div class="result-item">No busy intervals found.</div>';
+                    return;
+                }
+
+                resultsDiv.innerHTML = data.intervals.map((interval, i) => {
+                    const start = new Date(interval.startsAt).toLocaleString();
+                    const end = new Date(interval.endsAt).toLocaleString();
+                    return `
+                        <div class="result-item">
+                            <strong>Interval ${i + 1}:</strong><br>
+                            Start: ${start}<br>
+                            End: ${end}
+                        </div>
+                    `;
+                }).join('');
+            } catch (error) {
+                resultsDiv.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+            }
+        }
+
+        async function suggestSlots() {
+            const resultsDiv = document.getElementById('slots-results');
+            resultsDiv.innerHTML = '<div class="loading">Processing email and suggesting slots...</div>';
+
+            const emailMessage = {
+                threadId: "AAMkAGI2TAAA=",
+                isFirstInThread: true,
+                providerEmailId: "AAMkAGI2TAAA=",
+                to: [{ address: "matt.ffrench@fyxer.com", name: "Matt Ffrench" }],
+                from: {
+                    address: document.getElementById('email-from').value,
+                    name: document.getElementById('email-from-name').value
+                },
+                cc: [],
+                bcc: [],
+                content: "",
+                fullBody: document.getElementById('email-body').value,
+                isDraft: false,
+                isSpam: false,
+                messageId: "<>",
+                forwardedContent: undefined,
+                hasDoctypeHtml: false,
+                subject: document.getElementById('email-subject').value,
+                sentAt: new Date().toISOString(),
+                attachmentData: [],
+                hasUnsubscribeLink: false,
+                headers: [],
+                folderIds: [],
+                categoryIds: [],
+                isRead: false,
+                toEmailAddresses: ["matt.ffrench@fyxer.com"],
+                ccEmailAddresses: []
+            };
+
+            const useDeterministic = document.getElementById('use-deterministic').checked;
+
+            try {
+                const response = await fetch('/api/suggest-slots', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        emailMessage,
+                        useDeterministic
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to suggest slots');
+                }
+
+                if (data.slots.length === 0) {
+                    resultsDiv.innerHTML = '<div class="result-item">No meeting slots suggested. The email may not contain a meeting proposal, or no suitable times were found.</div>';
+                    return;
+                }
+
+                resultsDiv.innerHTML = data.slots.map((slot, i) => {
+                    const start = new Date(slot.startsAt).toLocaleString();
+                    const end = new Date(slot.endsAt).toLocaleString();
+                    return `
+                        <div class="result-item">
+                            <strong>Suggested Slot ${i + 1}:</strong><br>
+                            Start: ${start}<br>
+                            End: ${end}
+                        </div>
+                    `;
+                }).join('');
+            } catch (error) {
+                resultsDiv.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+            }
+        }
+    </script>
+</body>
+</html>
+
