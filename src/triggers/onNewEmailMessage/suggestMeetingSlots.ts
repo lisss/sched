@@ -130,20 +130,14 @@ const clampWindowToWorkingHours = (window: MinuteWindow): MinuteWindow => {
 };
 
 const extractRangeWindows = (content: string): WindowToken[] => {
-  // Match time ranges like "1-3pm", "9am-1pm", "1:30-3:45pm", "9am to 5pm"
-  // Handles cases where meridiem is only on the end (e.g., "1-3pm")
-  // Also handles ranges without spaces: "1-3pm", "9am-1pm"
   const rangeRegex =
-    /(\d{1,2})(?::(\d{2}))?\s?(am|pm)?\s*(?:-|to|–)\s*(\d{1,2})(?::(\d{2}))?\s?(am|pm)?/gi;
+    /(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:-|to|–)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/gi;
   const matches = [...content.matchAll(rangeRegex)];
 
   return matches
     .map((match) => {
       const [, startHour, startMinute, startMeridiem, endHour, endMinute, endMeridiem] = match;
       
-      // If no meridiem on start but there is one on end, use end's meridiem for start
-      // This handles "1-3pm" -> start is "1pm", end is "3pm"
-      // If no meridiem on either, assume PM for afternoon context
       const hasEndMeridiem = !!endMeridiem;
       const hasStartMeridiem = !!startMeridiem;
       
@@ -174,7 +168,6 @@ const extractRangeWindows = (content: string): WindowToken[] => {
         endMinutes: resolvedEnd,
       });
       
-      // Only return if the clamped window is still valid and meaningful
       if (clamped.endMinutes <= clamped.startMinutes || clamped.endMinutes - clamped.startMinutes < 15) {
         return null;
       }
@@ -317,7 +310,9 @@ const getDayMentions = (content: string, now: Date): DayMention[] => {
 
       const currentDayIndex = now.getDay();
       let delta = (targetIndex - currentDayIndex + 7) % 7;
-      if (nextQualifier) {
+      if (delta === 0 && nextQualifier) {
+        delta = 7;
+      } else if (nextQualifier) {
         delta += 7;
       }
       const candidate = new Date(now);
@@ -355,23 +350,40 @@ const createSlotsFromWindow = (
   const normalizedDay = new Date(day);
   normalizedDay.setHours(0, 0, 0, 0);
 
+  const startHours = Math.floor(window.startMinutes / MINUTES_IN_HOUR);
+  const startMins = window.startMinutes % MINUTES_IN_HOUR;
+  const endHours = Math.floor(window.endMinutes / MINUTES_IN_HOUR);
+  const endMins = window.endMinutes % MINUTES_IN_HOUR;
+
   for (
     let offset = window.startMinutes;
     offset + durationMinutes <= window.endMinutes;
     offset += durationMinutes
   ) {
+    const offsetHours = Math.floor(offset / MINUTES_IN_HOUR);
+    const offsetMins = offset % MINUTES_IN_HOUR;
+    
     const slotStart = new Date(normalizedDay);
-    slotStart.setMinutes(offset);
+    slotStart.setHours(offsetHours, offsetMins, 0, 0);
+    
+    const durationHours = Math.floor(durationMinutes / MINUTES_IN_HOUR);
+    const durationMins = durationMinutes % MINUTES_IN_HOUR;
     const slotEnd = new Date(slotStart);
-    slotEnd.setMinutes(slotStart.getMinutes() + durationMinutes);
+    slotEnd.setHours(
+      slotStart.getHours() + durationHours,
+      slotStart.getMinutes() + durationMins,
+      0,
+      0
+    );
+    
     slots.push({ startsAt: slotStart, endsAt: slotEnd });
   }
 
   if (slots.length === 0) {
     const slotStart = new Date(normalizedDay);
-    slotStart.setMinutes(window.startMinutes);
+    slotStart.setHours(startHours, startMins, 0, 0);
     const slotEnd = new Date(normalizedDay);
-    slotEnd.setMinutes(window.endMinutes);
+    slotEnd.setHours(endHours, endMins, 0, 0);
     if (slotEnd > slotStart) {
       slots.push({ startsAt: slotStart, endsAt: slotEnd });
     }
@@ -382,39 +394,47 @@ const createSlotsFromWindow = (
 
 const buildDayWindowPairs = (
   dayMentions: DayMention[],
-  windowTokens: WindowToken[]
+  windowTokens: WindowToken[],
+  content: string
 ): { day: Date; window: MinuteWindow }[] => {
-  const fallbackWindows =
-    windowTokens.length > 0 ? windowTokens : [{ window: defaultWindow, index: -1 }];
+  if (dayMentions.length === 0 || windowTokens.length === 0) {
+    return [];
+  }
+
+  const orRegex = /\s+or\s+/gi;
+  const orMatches = [...content.matchAll(orRegex)];
+  const orPositions = orMatches.map(m => ({
+    start: m.index ?? 0,
+    end: (m.index ?? 0) + m[0].length
+  }));
 
   return dayMentions.flatMap((mention, index) => {
-    const nextIndex = dayMentions[index + 1]?.index ?? Number.POSITIVE_INFINITY;
-    // Find windows that appear near this day mention (before or after, but before next day)
-    // Look up to 200 chars before the day mention to catch "wednesday afternoon 1-3pm"
+    const nextDayIndex = dayMentions[index + 1]?.index ?? content.length;
+    
+    const relevantOr = orPositions.find(or => 
+      or.start > mention.index && or.end < nextDayIndex
+    );
+    
+    const boundary = relevantOr ? relevantOr.end : nextDayIndex;
     const searchStart = Math.max(0, mention.index - 200);
     const windowsInSpan = windowTokens.filter(
-      (token) => token.index >= searchStart && token.index < nextIndex
+      (token) => token.index >= searchStart && token.index < boundary
     );
     
     if (windowsInSpan.length === 0) {
-      return fallbackWindows.map((token) => ({ day: mention.day, window: token.window }));
+      return [];
     }
     
-    // If multiple windows found, prefer more specific (smaller) windows
-    // This handles "wednesday afternoon 1-3pm" -> prefer "1-3pm" over "afternoon"
     const sortedWindows = windowsInSpan.sort((a, b) => {
       const aSize = a.window.endMinutes - a.window.startMinutes;
       const bSize = b.window.endMinutes - b.window.startMinutes;
-      // Prefer smaller (more specific) windows first
-      if (Math.abs(aSize - bSize) > 30) {
-        return aSize - bSize;
+      const sizeDiff = aSize - bSize;
+      if (Math.abs(sizeDiff) > 60) {
+        return sizeDiff;
       }
-      // Then prefer windows closer to the day mention
       return Math.abs(a.index - mention.index) - Math.abs(b.index - mention.index);
     });
     
-    // Use ONLY the most specific window (first after sorting) to avoid duplicates
-    // This ensures "wednesday afternoon 1-3pm" uses "1-3pm", not "afternoon"
     const bestWindow = sortedWindows[0];
     return [{ 
       day: mention.day, 
@@ -486,8 +506,6 @@ const isEmailMessageContainingMeetingProposal = async (
     throw new Error("OpenAI client unavailable");
   }
 
-  // LLM call to determine if email contains meeting proposal
-
   const prompt = `
   You are given the body of an email. Determine if it contains a proposal for a meeting (e.g., suggesting a time, asking to schedule, proposing to meet). 
   Answer only "YES" or "NO".
@@ -516,9 +534,6 @@ const suggestMeetingSlotsForMeetingProposal = async ({
   emailMessage: EmailMessage;
   userCalendarEvents: CalendarEvent[];
 }): Promise<TimeInterval[]> => {
-  // We don't have sender's calendar events, so only use the sender's email to detect times
-  // and user's calendar events to detect free slots
-
   const userBusySlots = getTimeIntervalsUserIsBusy(
     userCalendarEvents,
     emailMessage.toEmailAddresses[0] // assuming first recipient is the user
@@ -621,12 +636,33 @@ const suggestMeetingSlotsForMeetingProposalDeterministic = async ({
   const windowTokens = getWindowTokens(content);
   const requestedDurationMinutes = getRequestedDurationMinutes(content);
 
-  const dayWindowPairs =
-    dayMentions.length > 0
-      ? buildDayWindowPairs(dayMentions, windowTokens)
-      : upcomingWorkingDays(now, DEFAULT_WORKING_DAY_LOOKAHEAD).flatMap((day) =>
-          windowTokens.map((token) => ({ day, window: token.window }))
-        );
+  let dayWindowPairs: { day: Date; window: MinuteWindow }[] = [];
+  
+  if (dayMentions.length > 0 && windowTokens.length > 0) {
+    dayWindowPairs = buildDayWindowPairs(dayMentions, windowTokens, content);
+    
+    if (dayWindowPairs.length === 0) {
+      dayWindowPairs = dayMentions.flatMap((mention) =>
+        windowTokens.map((token) => ({ day: mention.day, window: token.window }))
+      );
+    }
+  } else if (dayMentions.length > 0 && windowTokens.length === 0) {
+    dayWindowPairs = dayMentions.map((mention) => ({ 
+      day: mention.day, 
+      window: defaultWindow 
+    }));
+  } else if (dayMentions.length === 0 && windowTokens.length > 0) {
+    dayWindowPairs = upcomingWorkingDays(now, DEFAULT_WORKING_DAY_LOOKAHEAD).flatMap((day) =>
+      windowTokens.map((token) => ({ day, window: token.window }))
+    );
+  }
+  
+  if (dayWindowPairs.length === 0 && dayMentions.length > 0) {
+    dayWindowPairs = dayMentions.map((mention) => ({ 
+      day: mention.day, 
+      window: defaultWindow 
+    }));
+  }
 
   const candidateSlots = dayWindowPairs.flatMap(({ day, window }) =>
     createSlotsFromWindow(day, window, requestedDurationMinutes)
